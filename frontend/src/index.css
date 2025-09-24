@@ -1,0 +1,4 @@
+/* Asegura que MUI funcione correctamente */
+html {
+  font-size: 14px; /* Ajusta el tamaño base si es necesario */
+}
