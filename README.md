@@ -1,56 +1,28 @@
 Sistema de inventario para pymes
 con react, node, postgresql
 desarrollado para IACC 2025
-<<<<<<< HEAD
-Sistema de inventario para pymes
-con react, node, postgresql
-desarrollado para IACC 2025
-=======
-## Arquitectura general
-- El proyecto está dividido en dos carpetas principales:
-  - `backend/`: API REST en Node.js con Express, conecta a PostgreSQL usando el paquete `pg`.
-  - `frontend/`: Aplicación React creada con Create React App, utiliza Material UI y Axios para consumir la API.
+Autenticación y Roles:
+Login como admin (ej: admin@test.com / admin123) → Acceso completo (agregar/editar/eliminar items, RFID updates).
+Login como user → Vista de solo lectura (ve inventario y escanea RFID, pero no edita stock).
 
-## Flujos de desarrollo
-- **Backend**
-  - Ejecutar en modo desarrollo: `npm run dev` (usa nodemon)
-  - Ejecutar en modo producción: `npm start`
-  - Archivo principal: `backend/server.js`
-  - Variables de entorno gestionadas con `dotenv`.
-  - Endpoints y lógica principal en `server.js`.
-- **Frontend**
-  - Ejecutar en modo desarrollo: `npm start` dentro de `frontend/`
-  - Ejecutar tests: `npm test` dentro de `frontend/`
-  - Build de producción: `npm run build` dentro de `frontend/`
+Gestión de Inventario:
+Formulario: Agrega/edita items con campos obligatorios (SKU, Nombre, Cantidad, Stock Mínimo) + RFID Tag opcional (ej: "RFID-TEST1").
+Tabla: Muestra todos los items con columnas nuevas (RFID Tag, Estado con chips). Búsqueda incluye RFID/SKU/Nombre. Filtro "Solo Bajo Stock".
+Gráficos: Pie Chart (top 5 items por stock) y Bar Chart (bajo vs normal stock) – se actualizan automáticamente al cambiar stock.
+Estadísticas: Cards con total items, stock total, bajo stock, promedio mínimo.
 
-## Convenciones y patrones
-- **Backend**
-  - Uso de middlewares estándar: `body-parser`, `cors`.
-  - Conexión a base de datos PostgreSQL mediante el paquete `pg`.
-  - Estructura simple, toda la lógica en `server.js`.
-- **Frontend**
-  - Componentes React funcionales.
-  - Uso de Material UI para estilos y componentes visuales.
-  - Axios para llamadas HTTP al backend.
-  - Tests con Testing Library y Jest.
+RFID con Emulación:
+Sección Escáner: Input de texto – escribe tag (ej: "RFID-TEST1") + Enter → Simula lectura, muestra detalles del item (nombre, stock actual, estado bajo/normal).
+Actualizaciones: Botones +1 (Entrada) / -1 (Salida) (solo admin) → Modifica stock en DB, previene negativos, refresca tabla/gráficos. Alertas para errores (ej: "Stock insuficiente", "Item no encontrado").
+Fallback: Si no hay RFID, busca por SKU.
+Logs: Consola muestra escaneos/updates (ej: "RFID Update: RFID-TEST1 - Stock de 5 a 6").
 
-## Integraciones y comunicación
-- El frontend consume la API del backend usando Axios.
-- El backend expone endpoints REST, configurados para aceptar CORS.
-- No hay autenticación ni autorización implementada por defecto.
-
-## Ejemplo de flujo de trabajo
-1. Para desarrollar el backend, modifica `backend/server.js` y usa `npm run dev`.
-2. Para desarrollar el frontend, modifica archivos en `frontend/src/` y usa `npm start`.
-3. Para agregar dependencias, usa `npm install <paquete>` en la carpeta correspondiente.
-
-## Archivos clave
-- `backend/server.js`: lógica principal del servidor y endpoints.
-- `frontend/src/App.js`: componente principal de la app React.
-- `frontend/package.json` y `backend/package.json`: scripts y dependencias.
-
-## Notas
-- No hay configuración personalizada de ESLint, solo la estándar de Create React App en frontend.
-- No hay dockerización ni CI/CD configurados por defecto.
-- El README principal está vacío; la documentación relevante está en el README de frontend.
->>>>>>> e6f4e7e (Actualiza frontend, documentación y agrega login)
+Seguridad y UX:
+Tokens JWT (expiran en 1h), logout limpia todo.
+Loaders (CircularProgress) y alertas (error/success/info) para feedback.
+Responsive: Funciona en mobile/desktop (Material-UI).
+Pruebas Rápidas para Confirmar (Si No las Hiciste)
+Backend: node server.js → "Servidor corriendo en puerto 5000". Prueba en Postman: POST /api/auth/login → Token OK.
+Frontend: npm start → Login admin → Agrega item con RFID → Escanea (escribe tag + Enter) → +1/-1 → Ver cambios en tabla/gráficos.
+User Mode: Logout → Login user → Escanea RFID → Ve info pero sin botones (alerta "No autorizado").
+Edge Cases: Intenta -1 en stock=0 → Error. Busca por RFID inexistente → "Item no encontrado".

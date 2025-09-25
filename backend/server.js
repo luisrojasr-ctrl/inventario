@@ -1,16 +1,18 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
 const { Pool } = require('pg');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-const port = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';  // Usa .env o fallback
+const PORT = process.env.PORT || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || 'tu_jwt_secreto_super_seguro';  // Cambia en .env
 
-// Configuración de la base de datos
+app.use(cors());
+app.use(express.json());
+
+// Conexión a PostgreSQL
 const pool = new Pool({
   user: process.env.DB_USER || 'postgres',
   host: process.env.DB_HOST || 'localhost',
@@ -19,206 +21,195 @@ const pool = new Pool({
   port: process.env.DB_PORT || 5432,
 });
 
-app.use(cors());
-app.use(bodyParser.json());
-
-// Middleware para verificar JWT (protege rutas)
+// Middleware: Verificar JWT
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];  // Bearer TOKEN
-
-  if (!token) {
-    return res.status(401).json({ error: 'Token requerido' });
-  }
+  if (!token) return res.status(401).json({ error: 'Token requerido' });
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: 'Token inválido o expirado' });
-    }
-    req.user = user;  // user = { id, email, rol }
+    if (err) return res.status(403).json({ error: 'Token inválido' });
+    req.user = user;
     next();
   });
 };
 
-// Middleware para verificar rol admin (opcional, para editar/eliminar)
+// Middleware: Solo admin
 const requireAdmin = (req, res, next) => {
   if (req.user.rol !== 'admin') {
-    return res.status(403).json({ error: 'Requiere rol admin' });
+    return res.status(403).json({ error: 'Acceso denegado: Solo admins' });
   }
   next();
 };
 
-// === RUTAS DE AUTENTICACIÓN (PÚBLICAS) ===
-
-// Registro de usuario
+// Route: Registro de usuario (default rol 'user')
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { email, password, rol } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email y password requeridos' });
-    }
-    if (rol && !['user', 'admin'].includes(rol)) {
-      return res.status(400).json({ error: 'Rol debe ser "user" o "admin"' });
-    }
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email y password requeridos' });
 
-    // Verificar si email ya existe
-    const emailCheck = await pool.query('SELECT id FROM usuarios WHERE email = $1', [email]);
-    if (emailCheck.rows.length > 0) {
-      return res.status(409).json({ error: 'Email ya registrado' });
-    }
-
-    // Hash del password
-    const hashedPassword = bcrypt.hashSync(password, 10);
-
+    const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
       'INSERT INTO usuarios (email, password, rol) VALUES ($1, $2, $3) RETURNING id, email, rol',
-      [email, hashedPassword, rol || 'user']
+      [email, hashedPassword, 'user']  // Default 'user'
     );
-
-    // Generar JWT
-    const user = result.rows[0];
-    const token = jwt.sign({ id: user.id, email: user.email, rol: user.rol }, JWT_SECRET, { expiresIn: '1h' });
-
-    res.status(201).json({ message: 'Usuario registrado', token, user: { id: user.id, email: user.email, rol: user.rol } });
+    res.status(201).json({ message: 'Usuario registrado', user: result.rows[0] });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Error al registrar usuario' });
+    if (err.code === '23505') {  // Unique violation
+      res.status(400).json({ error: 'Email ya existe' });
+    } else {
+      console.error('Error registro:', err);
+      res.status(500).json({ error: 'Error interno' });
+    }
   }
 });
 
-// Login de usuario
+// Route: Login
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email y password requeridos' });
-    }
-
     const result = await pool.query('SELECT * FROM usuarios WHERE email = $1', [email]);
-    if (result.rows.length === 0) {
-      return res.status(401).json({ error: 'Credenciales inválidas' });
-    }
+    if (result.rows.length === 0) return res.status(401).json({ error: 'Credenciales inválidas' });
 
     const user = result.rows[0];
-    const isValidPassword = bcrypt.compareSync(password, user.password);
+    const validPassword = await bcrypt.compare(password, user.password);
+    if (!validPassword) return res.status(401).json({ error: 'Credenciales inválidas' });
 
-    if (!isValidPassword) {
-    return res.status(401).json({ error: 'Credenciales inválidas' });
-    }
-
-    // Generar JWT
     const token = jwt.sign({ id: user.id, email: user.email, rol: user.rol }, JWT_SECRET, { expiresIn: '1h' });
-
-    res.json({ message: 'Login exitoso', token, user: { id: user.id, email: user.email, rol: user.rol } });
+    res.json({ token, user: { id: user.id, email: user.email, rol: user.rol } });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Error al iniciar sesión' });
+    console.error('Error login:', err);
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
-// === RUTAS DE INVENTARIO (PROTEGIDAS) ===
-
-// GET: Obtener inventario (requiere token, user puede ver)
+// Routes: Inventario (existentes)
 app.get('/api/inventario', authenticateToken, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM inventario ORDER BY id ASC');
+    const result = await pool.query('SELECT * FROM inventario ORDER BY id');
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Error al obtener inventario' });
+    console.error('Error GET inventario:', err);
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
-// POST: Agregar item (requiere admin)
 app.post('/api/inventario', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { nombre, cantidad, sku, stock_minimo } = req.body;
+    const { nombre, cantidad, sku, stock_minimo, rfid_tag } = req.body;  // Nuevo: rfid_tag
     if (!nombre || !cantidad || !sku || stock_minimo === undefined) {
-      return res.status(400).json({ error: 'Nombre, cantidad, SKU y stock mínimo son requeridos' });
+      return res.status(400).json({ error: 'Campos requeridos: nombre, cantidad, sku, stock_minimo' });
     }
-    if (parseInt(cantidad) < 0 || parseInt(stock_minimo) < 0) {
-      return res.status(400).json({ error: 'Cantidad y stock mínimo deben ser 0 o mayores' });
-    }
-
-    const skuCheck = await pool.query('SELECT id FROM inventario WHERE sku = $1', [sku.toUpperCase()]);
-    if (skuCheck.rows.length > 0) {
-      return res.status(409).json({ error: 'El SKU ya existe. Debe ser único.' });
-    }
-
     const result = await pool.query(
-      'INSERT INTO inventario (nombre, cantidad, sku, stock_minimo) VALUES ($1, $2, $3, $4) RETURNING *',
-      [nombre, parseInt(cantidad), sku.toUpperCase(), parseInt(stock_minimo)]
+      'INSERT INTO inventario (nombre, cantidad, sku, stock_minimo, rfid_tag) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [nombre, parseInt(cantidad), sku, parseInt(stock_minimo), rfid_tag || null]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error(err);
     if (err.code === '23505') {
-      res.status(409).json({ error: 'El SKU ya existe. Debe ser único.' });
+      res.status(400).json({ error: 'SKU o RFID ya existe' });
     } else {
-      res.status(500).json({ error: 'Error al agregar item' });
+      console.error('Error POST inventario:', err);
+      res.status(500).json({ error: 'Error interno' });
     }
   }
 });
 
-// PUT: Actualizar item (requiere admin)
 app.put('/api/inventario/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre, cantidad, sku, stock_minimo } = req.body;
-    if (!nombre || !cantidad || !sku || stock_minimo === undefined) {
-      return res.status(400).json({ error: 'Nombre, cantidad, SKU y stock mínimo son requeridos' });
-    }
-    if (parseInt(cantidad) < 0 || parseInt(stock_minimo) < 0) {
-      return res.status(400).json({ error: 'Cantidad y stock mínimo deben ser 0 o mayores' });
-    }
-
-    const skuCheck = await pool.query(
-      'SELECT id FROM inventario WHERE sku = $1 AND id != $2',
-      [sku.toUpperCase(), parseInt(id)]
-    );
-    if (skuCheck.rows.length > 0) {
-      return res.status(409).json({ error: 'El SKU ya existe en otro artículo.' });
-    }
-
+    const { nombre, cantidad, sku, stock_minimo, rfid_tag } = req.body;
     const result = await pool.query(
-      'UPDATE inventario SET nombre = $1, cantidad = $2, sku = $3, stock_minimo = $4 WHERE id = $5 RETURNING *',
-      [nombre, parseInt(cantidad), sku.toUpperCase(), parseInt(stock_minimo), parseInt(id)]
+      'UPDATE inventario SET nombre=$1, cantidad=$2, sku=$3, stock_minimo=$4, rfid_tag=$5 WHERE id=$6 RETURNING *',
+      [nombre, parseInt(cantidad), sku, parseInt(stock_minimo), rfid_tag || null, parseInt(id)]
     );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Item no encontrado' });
-    }
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Item no encontrado' });
     res.json(result.rows[0]);
   } catch (err) {
-    console.error(err);
     if (err.code === '23505') {
-      res.status(409).json({ error: 'El SKU ya existe. Debe ser único.' });
+      res.status(400).json({ error: 'SKU o RFID ya existe' });
     } else {
-      res.status(500).json({ error: 'Error al actualizar item' });
+      console.error('Error PUT inventario:', err);
+      res.status(500).json({ error: 'Error interno' });
     }
   }
 });
 
-// DELETE: Eliminar item (requiere admin)
 app.delete('/api/inventario/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM inventario WHERE id = $1 RETURNING *', [parseInt(id)]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Item no encontrado' });
-    }
-    res.json({ message: 'Item eliminado exitosamente' });
+    const result = await pool.query('DELETE FROM inventario WHERE id=$1 RETURNING *', [parseInt(id)]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Item no encontrado' });
+    res.json({ message: 'Item eliminado' });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Error al eliminar item' });
+    console.error('Error DELETE inventario:', err);
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
-// Manejo de errores global
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Algo salió mal en el servidor' });
+// Nuevos Routes: RFID
+app.get('/api/inventario/rfid/:tag', authenticateToken, async (req, res) => {
+  try {
+    const { tag } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM inventario WHERE rfid_tag = $1 OR sku = $1',  // Fallback a SKU
+      [tag]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Item no encontrado con RFID/SKU: ' + tag });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error buscando RFID:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
 });
 
-app.listen(port, () => {
-  console.log(`Servidor corriendo en http://localhost:${port}`);
+app.put('/api/inventario/rfid/:tag/stock', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { tag } = req.params;
+    const { delta } = req.body;
+    if (!delta || typeof delta !== 'number') {
+      return res.status(400).json({ error: 'Delta requerido (número entero)' });
+    }
+
+    const result = await pool.query(
+      'SELECT * FROM inventario WHERE rfid_tag = $1 OR sku = $1 FOR UPDATE',
+      [tag]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Item no encontrado con RFID/SKU: ' + tag });
+    }
+
+    const item = result.rows[0];
+    if (delta < 0 && item.cantidad === 0) {
+      return res.status(400).json({ error: 'Stock insuficiente para salida' });
+    }
+
+    const newCantidad = Math.max(0, item.cantidad + delta);
+    await pool.query(
+      'UPDATE inventario SET cantidad = $1 WHERE rfid_tag = $2 OR sku = $2',
+      [newCantidad, tag]
+    );
+
+    console.log(`RFID Update: ${tag} - Stock de ${item.cantidad} a ${newCantidad} (delta: ${delta}) por ${req.user.email}`);
+    res.json({
+      success: true,
+      item: { ...item, cantidad: newCantidad },
+      message: `Stock actualizado: ${newCantidad} unidades`
+    });
+  } catch (err) {
+    console.error('Error actualizando stock RFID:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Servidor corriendo en puerto ${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  await pool.end();
+  process.exit(0);
 });

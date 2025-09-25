@@ -45,6 +45,15 @@ function Login({ onLogin }) {
         {isRegister ? 'Registro' : 'Iniciar Sesión'}
       </Typography>
 
+        {/* Nuevo: Alert con Credenciales de Prueba */}
+        <Alert severity="info" sx={{ mb: 2, width: '100%' }}>
+          <Typography variant="body2">
+            <strong>Credenciales de Prueba:</strong><br />
+            • Admin: admin@test.com / 123456 (acceso completo)<br />
+            • Usuario: user@test.com / password123 (solo lectura)
+          </Typography>
+        </Alert>
+
       {error && <Alert severity="error" sx={{ mb: 2, width: '100%' }}>{error}</Alert>}
 
       <form onSubmit={handleSubmit} style={{ width: '100%' }}>
