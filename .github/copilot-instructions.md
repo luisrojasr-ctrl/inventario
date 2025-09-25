@@ -1,11 +1,5 @@
-Sistema de inventario para pymes
-con react, node, postgresql
-desarrollado para IACC 2025
-<<<<<<< HEAD
-Sistema de inventario para pymes
-con react, node, postgresql
-desarrollado para IACC 2025
-=======
+# Guía para agentes AI en el proyecto Inventario
+
 ## Arquitectura general
 - El proyecto está dividido en dos carpetas principales:
   - `backend/`: API REST en Node.js con Express, conecta a PostgreSQL usando el paquete `pg`.
@@ -53,4 +47,6 @@ desarrollado para IACC 2025
 - No hay configuración personalizada de ESLint, solo la estándar de Create React App en frontend.
 - No hay dockerización ni CI/CD configurados por defecto.
 - El README principal está vacío; la documentación relevante está en el README de frontend.
->>>>>>> e6f4e7e (Actualiza frontend, documentación y agrega login)
+
+---
+¿Hay algún flujo, convención o integración que no esté claro o que debamos documentar mejor para agentes AI?
